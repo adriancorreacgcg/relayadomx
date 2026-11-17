@@ -7,47 +7,84 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Color;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.nfc.NfcAdapter;
 import android.nfc.cardemulation.CardEmulation;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 
-public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, Remoto.Aviso {
+public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, Remoto.Enlace, Remoto.Log {
+
+    public static volatile MainActivity I;
 
     private static final String USB_PERMISSION_ACTION = "com.relayadomx.USB_PERMISSION";
+    private static final int NINGUNO = 0;
+    private static final int PAGAR = 1;
+    private static final int TARJETA = 2;
 
     private UsbManager usbManager;
-    private TextView statusText;
+    private TextView modoEstado;
+    private TextView brokerEstado;
+    private TextView enlaceEstado;
+    private TextView tarjetaEstado;
+    private TextView txEstado;
     private TextView cardInfo;
     private TextView logText;
+    private ScrollView scrollLog;
     private EditText panText;
     private EditText vencText;
     private EditText servicioText;
     private EditText claveText;
     private final StringBuilder logBuffer = new StringBuilder();
+    private final StringBuilder logPendiente = new StringBuilder();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private boolean flushAgendado;
     private final List<byte[]> historial = new ArrayList<>();
+    private final ExecutorService trabajo = Executors.newSingleThreadExecutor();
     private Pn532 pn532;
     private Lector lector;
     private volatile boolean relay;
     private volatile boolean estatico;
     private volatile boolean aprender;
+    private volatile boolean arrancando;
     private volatile int genDren;
+    private volatile int modo = NINGUNO;
+    private volatile String broker = "apagado";
+    private volatile boolean enlazado;
+    private volatile boolean tarjetaLista;
+    private volatile boolean tx;
+    private volatile long txUltima;
     private Thread hiloRelay;
     private UsbDevice pendiente;
     private volatile int ultimoEstado = -1;
+
+    private final Runnable latidoTx = new Runnable() {
+        @Override public void run() {
+            if (tx && System.currentTimeMillis() - txUltima > 5000) {
+                tx = false;
+                render();
+            }
+            ui.postDelayed(this, 1000);
+        }
+    };
 
     private final BroadcastReceiver permissionReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -55,7 +92,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
             if (pendiente != null && usbManager.hasPermission(pendiente)) {
                 abrir(pendiente);
             } else {
-                showStatus("Permiso USB denegado");
+                log("Permiso USB denegado");
             }
             pendiente = null;
         }
@@ -65,13 +102,19 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
-        Remoto.registro = this::log;
+        I = this;
+        Remoto.registro = this;
         Aprendiz.iniciar(this);
         Datos.iniciar(this);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
-        statusText = findViewById(R.id.status);
+        modoEstado = findViewById(R.id.modoEstado);
+        brokerEstado = findViewById(R.id.brokerEstado);
+        enlaceEstado = findViewById(R.id.enlaceEstado);
+        tarjetaEstado = findViewById(R.id.tarjetaEstado);
+        txEstado = findViewById(R.id.txEstado);
         cardInfo = findViewById(R.id.cardInfo);
         logText = findViewById(R.id.logText);
+        scrollLog = findViewById(R.id.scrollLog);
         panText = findViewById(R.id.panText);
         vencText = findViewById(R.id.vencText);
         servicioText = findViewById(R.id.servicioText);
@@ -83,11 +126,11 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         lector = new Lector(this, this);
 
         findViewById(R.id.connectButton).setOnClickListener(v -> {
-            if (pn532.abierto()) { detenerTodo(); pn532.cerrar(); showStatus("Sin conexión USB"); }
+            if (pn532.abierto()) { detenerTodo(); pn532.cerrar(); log("Sin conexión USB"); }
             else conectar();
         });
-        findViewById(R.id.modoPagarButton).setOnClickListener(v -> modoPagar());
-        findViewById(R.id.modoTarjetaButton).setOnClickListener(v -> modoTarjeta());
+        findViewById(R.id.modoPagarButton).setOnClickListener(v -> tocarModo(PAGAR));
+        findViewById(R.id.modoTarjetaButton).setOnClickListener(v -> tocarModo(TARJETA));
         findViewById(R.id.aprenderButton).setOnClickListener(v -> iniciarAprender());
         findViewById(R.id.subirAtcButton).setOnClickListener(v -> subirAtc(1000));
         findViewById(R.id.relayButton).setOnClickListener(v -> iniciarRelay());
@@ -104,6 +147,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         });
         findViewById(R.id.clearButton).setOnClickListener(v -> {
             logBuffer.setLength(0);
+            logPendiente.setLength(0);
             logText.setText("");
         });
 
@@ -113,7 +157,42 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         } else {
             registerReceiver(permissionReceiver, filter);
         }
+        render();
+        ui.postDelayed(latidoTx, 1000);
         log("Elige modo y usa la misma clave en los dos teléfonos.");
+    }
+
+    private void render() {
+        runOnUiThread(() -> {
+            modoEstado.setText(modo == PAGAR ? "Modo: PAGAR seleccionado"
+                    : modo == TARJETA ? "Modo: TARJETA seleccionado"
+                    : "Modo: ninguno");
+            brokerEstado.setText("Broker: " + broker);
+            brokerEstado.setTextColor(broker.startsWith("conectado") ? 0xFF2E7D32
+                    : broker.startsWith("sin") ? 0xFFC62828 : 0xFF6D4C41);
+            enlaceEstado.setText(modo == NINGUNO ? "Enlace: —"
+                    : enlazado ? "Enlace: ENLAZADO al otro teléfono"
+                    : "Enlace: esperando al otro teléfono");
+            enlaceEstado.setTextColor(enlazado ? 0xFF2E7D32 : 0xFF6D4C41);
+            String t;
+            if (modo == TARJETA) t = "Tarjeta: " + (tarjetaLista ? "lista" : "sin tarjeta");
+            else if (modo == PAGAR) t = "Tarjeta: " + (enlazado
+                    ? (tarjetaLista ? "lista en el otro teléfono" : "sin tarjeta en el otro teléfono")
+                    : "—");
+            else t = "Tarjeta: —";
+            tarjetaEstado.setText(t);
+            tarjetaEstado.setTextColor(tarjetaLista ? 0xFF2E7D32 : 0xFF6D4C41);
+            txEstado.setText(tx ? "Transacción: EN CURSO" : "Transacción: esperando");
+            txEstado.setTextColor(tx ? 0xFFC62828 : 0xFF6D4C41);
+        });
+    }
+
+    void apduEntrante() {
+        txUltima = System.currentTimeMillis();
+        if (!tx) {
+            tx = true;
+            render();
+        }
     }
 
     private String clave() {
@@ -121,23 +200,40 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         return c.isEmpty() ? "0000" : c;
     }
 
-    private void modoPagar() {
-        detenerTodo();
-        Puente.I.activar();
-        preferir(true);
-        drenar();
-        Remoto.I.conectar(clave(), true, null, this);
-        showStatus("Modo pagar · esperando par");
-        log("Modo pagar con clave " + clave() + ", esperando al otro teléfono");
+    private void tocarModo(int cual) {
+        if (arrancando) return;
+        if (modo == cual) { detenerTodo(); return; }
+        arrancar(cual);
     }
 
-    private void modoTarjeta() {
-        detenerTodo();
-        lector.iniciar();
-        drenar();
-        Remoto.I.conectar(clave(), false, lector, this);
-        showStatus("Modo tarjeta · acerca la tarjeta al teléfono");
-        log("Modo tarjeta con clave " + clave() + ", pon la tarjeta atrás");
+    private void arrancar(final int cual) {
+        arrancando = true;
+        final String clave = clave();
+        trabajo.execute(() -> {
+            try {
+                pararInterno();
+                modo = cual;
+                broker = "conectando…";
+                enlazado = false;
+                tarjetaLista = false;
+                tx = false;
+                render();
+                Puente.I.activar();
+                preferir(true);
+                if (cual == TARJETA) {
+                    runOnUiThread(() -> lector.iniciar());
+                    log("Modo tarjeta con clave " + clave + ", pon la tarjeta atrás");
+                } else {
+                    log("Modo pagar con clave " + clave + ", esperando al otro teléfono");
+                }
+                drenar();
+                Remoto.I.conectar(clave, cual == PAGAR, cual == TARJETA ? lector : null, this);
+            } catch (Exception e) {
+                log("Error al arrancar: " + e.getMessage());
+            } finally {
+                arrancando = false;
+            }
+        });
     }
 
     private void drenar() {
@@ -155,17 +251,61 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         }, "drenar").start();
     }
 
+    private void detenerTodo() {
+        if (arrancando) return;
+        arrancando = true;
+        trabajo.execute(() -> {
+            try {
+                pararInterno();
+            } finally {
+                arrancando = false;
+            }
+        });
+    }
+
+    private void pararInterno() {
+        relay = false;
+        estatico = false;
+        genDren++;
+        Puente.I.desactivar();
+        Remoto.I.desconectar();
+        try { lector.detener(); } catch (Exception ignored) { }
+        hiloRelay = null;
+        preferir(false);
+        modo = NINGUNO;
+        enlazado = false;
+        tarjetaLista = false;
+        tx = false;
+        broker = "apagado";
+        render();
+    }
+
+    @Override public void onBroker(String estado) {
+        broker = estado;
+        render();
+    }
+
+    @Override public void onPar(boolean v) {
+        enlazado = v;
+        render();
+    }
+
+    @Override public void onTarjetaRemota(boolean v) {
+        tarjetaLista = v;
+        render();
+    }
+
     @Override public void onAviso(String texto) {
-        showStatus(texto);
         log(texto);
-        if (texto.startsWith("enlazado")) {
-            runOnUiThread(() -> statusText.setText("ENLAZADO · ya puedes presentar"));
-        }
+    }
+
+    @Override public void onLog(String texto) {
+        log(texto);
     }
 
     private void conectar() {
         List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
-        if (drivers.isEmpty()) { showStatus("No se encontró adaptador"); return; }
+        if (drivers.isEmpty()) { log("No se encontró adaptador"); return; }
         UsbDevice elegido = drivers.get(0).getDevice();
         for (UsbSerialDriver d : drivers) {
             if (d.getDevice().getVendorId() == 0x10c4) { elegido = d.getDevice(); break; }
@@ -176,7 +316,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
             PendingIntent pi = PendingIntent.getBroadcast(this, 0,
                     new Intent(USB_PERMISSION_ACTION).setPackage(getPackageName()), flags);
             usbManager.requestPermission(elegido, pi);
-            showStatus("Esperando permiso USB…");
+            log("Esperando permiso USB…");
             return;
         }
         abrir(elegido);
@@ -185,21 +325,18 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private void abrir(UsbDevice dispositivo) {
         try {
             pn532.abrir(usbManager, dispositivo, this);
-            showStatus("USB conectado · 115200");
-            log("USB conectado");
+            log("USB conectado · 115200");
         } catch (Exception e) {
             log("Error al conectar: " + e.getMessage());
-            showStatus("Error de conexión");
         }
     }
 
     private void subirAtc(int veces) {
-        if (!pn532.abierto()) { showStatus("Conecta el USB primero"); return; }
+        if (!pn532.abierto()) { log("Conecta el USB primero"); return; }
         if (relay) return;
         byte[] cmd = Aprendiz.comandoAE();
-        if (cmd == null) { showStatus("Aprende primero"); return; }
+        if (cmd == null) { log("Aprende primero"); return; }
         relay = true;
-        showStatus("Subiendo ATC");
         new Thread(() -> {
             int ok = 0;
             try {
@@ -212,10 +349,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                         continue;
                     }
                     ok++;
-                    if (ok % 100 == 0) {
-                        log("ATC ahora " + atcDe(r) + " · " + ok + " incrementos");
-                        showStatus("ATC " + atcDe(r));
-                    }
+                    if (ok % 100 == 0) log("ATC ahora " + atcDe(r) + " · " + ok + " incrementos");
                 }
                 log("Listo: " + ok + " incrementos");
             } catch (Exception e) {
@@ -236,7 +370,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     }
 
     private void iniciarRelay() {
-        if (!pn532.abierto()) { showStatus("Conecta el USB primero"); return; }
+        if (!pn532.abierto()) { log("Conecta el USB primero"); return; }
         if (relay) return;
         estatico = false;
         aprender = false;
@@ -246,12 +380,11 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         hiloRelay = new Thread(this::bucleRelay);
         hiloRelay.start();
         preferir(true);
-        showStatus("Relay activo");
         log("Relay activo: tarjeta en el lector, teléfono en la terminal.");
     }
 
     private void iniciarAprender() {
-        if (!pn532.abierto()) { showStatus("Conecta el USB primero"); return; }
+        if (!pn532.abierto()) { log("Conecta el USB primero"); return; }
         if (relay) return;
         estatico = false;
         aprender = true;
@@ -262,7 +395,6 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         hiloRelay = new Thread(this::bucleRelay);
         hiloRelay.start();
         preferir(true);
-        showStatus("Aprendiendo");
         log("Aprendiendo: tarjeta en el lector, presenta el teléfono.");
     }
 
@@ -275,7 +407,6 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         Perfil.variante(variante);
         Puente.I.activarEstatico();
         preferir(true);
-        showStatus("Modo " + variante + " activo");
         log("== modo " + variante + " ==");
         estatico = true;
         new Thread(() -> {
@@ -288,21 +419,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     return;
                 }
             }
-            String resto = Puente.I.sacarBitacora();
-            if (!resto.isEmpty()) log(resto.trim());
         }).start();
-    }
-
-    private void detenerTodo() {
-        relay = false;
-        estatico = false;
-        genDren++;
-        Puente.I.desactivar();
-        Remoto.I.desconectar();
-        try { lector.detener(); } catch (Exception ignored) { }
-        hiloRelay = null;
-        preferir(false);
-        showStatus("Detenido");
     }
 
     private void preferir(boolean activo) {
@@ -328,21 +445,14 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private boolean activarTarjeta() {
         byte[] p = pn532.transceive(Pn532Protocol.commandRaw(0x4A, new byte[] { 1, 0 }), 3000);
         if (p == null) { log("  poll sin respuesta"); return false; }
-        log("  poll: " + corto(p));
         return p.length > 2 && (p[1] & 0xff) == 0x4b && (p[2] & 0xff) >= 1;
     }
 
     private byte[] enviarCon(byte[] apdu, int tg, int ms) {
         ultimoEstado = -1;
         byte[] params = Pn532Protocol.concat(new byte[] { (byte) tg }, apdu);
-        long t0 = System.currentTimeMillis();
         byte[] r = pn532.transceive(Pn532Protocol.commandRaw(0x40, params), ms);
-        long transcurrido = System.currentTimeMillis() - t0;
-        if (r == null) {
-            ultimoEstado = -2;
-            log("  esperé " + transcurrido + " ms y nada");
-            return null;
-        }
+        if (r == null) { ultimoEstado = -2; return null; }
         if (r.length < 3 || (r[1] & 0xff) != 0x41) { ultimoEstado = -3; return null; }
         ultimoEstado = r[2] & 0xff;
         if (ultimoEstado != 0) return null;
@@ -407,15 +517,12 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
 
     private boolean recuperar() {
         pn532.transceive(Pn532Protocol.commandRaw(0x14, new byte[] { 1, 0x14, 1 }), 600);
-        if (!activarTarjeta()) {
-            log("No pude reactivar la tarjeta");
-            return false;
-        }
+        if (!activarTarjeta()) { log("No pude reactivar la tarjeta"); return false; }
         if (historial.isEmpty()) return true;
         log("Reactivo y repongo " + historial.size() + " comando(s) de contexto");
         for (byte[] h : historial) {
             byte[] resp = enviar(h, 1);
-            log("  repongo " + Pn532Protocol.hex(h) + (resp == null ? " falló (" + ultimoEstado + ")" : " ok"));
+            log("  repongo " + Pn532Protocol.hex(h) + (resp == null ? " falló" : " ok"));
             try { Thread.sleep(50); } catch (InterruptedException ignored) { }
         }
         return true;
@@ -433,13 +540,9 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                         tg = 1;
                         fallos = 0;
                         log("Tarjeta activada");
-                        runOnUiThread(() -> cardInfo.setText("Tarjeta activada"));
                     } else {
                         fallos++;
-                        if (fallos % 15 == 0) {
-                            log("Reinicializando chip");
-                            limpiarChip();
-                        }
+                        if (fallos % 15 == 0) { log("Reinicializando chip"); limpiarChip(); }
                         Thread.sleep(300);
                         continue;
                     }
@@ -464,10 +567,10 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                 if (datos == null) {
                     if ((apdu[1] & 0xff) == 0xB2) {
                         Puente.I.responder(new byte[] { 0x6A, (byte) 0x83 });
-                        log("Falló definitivo " + Pn532Protocol.hex(apdu) + " (estado " + ultimoEstado + "), contesto 6A83");
+                        log("Falló definitivo " + Pn532Protocol.hex(apdu) + ", contesto 6A83");
                     } else {
                         Puente.I.responder(new byte[] { 0x6F, 0x00 });
-                        log("Falló definitivo " + Pn532Protocol.hex(apdu) + " (estado " + ultimoEstado + ")");
+                        log("Falló definitivo " + Pn532Protocol.hex(apdu));
                         tg = 0;
                     }
                     continue;
@@ -484,7 +587,6 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     Aprendiz.guardar(apdu, datos);
                     Datos.guardarOriginal(datos);
                     log("guardo " + Pn532Protocol.hex(apdu));
-                    showStatus("Aprendidas: " + Aprendiz.cuantas());
                 }
 
                 Puente.I.responder(datos);
@@ -510,35 +612,30 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     }
 
     private void capturar() {
-        if (!pn532.abierto()) { showStatus("Conecta el USB primero"); return; }
+        if (!pn532.abierto()) { log("Conecta el USB primero"); return; }
         new Thread(() -> {
             log("== captura ==");
             log("init: " + (pn532.transceive(Pn532Protocol.commandRaw(0x14, new byte[] { 1, 0x14, 1 }), 800) == null ? "sin respuesta" : "ok"));
             if (!activarTarjeta()) { log("sin tarjeta en el lector"); return; }
-
             ByteArrayOutputStream todo = new ByteArrayOutputStream();
             byte[] ppse = new byte[] { 0x00, (byte) 0xA4, 0x04, 0x00, 0x0E,
                     0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E,
                     0x44, 0x44, 0x46, 0x30, 0x31, 0x00 };
             byte[] r = enviar(ppse, 1);
-            if (r == null) { log("PPSE falló (" + ultimoEstado + ")"); return; }
+            if (r == null) { log("PPSE falló"); return; }
             todo.write(r, 0, r.length);
             imprimirTag("AID", 0x4F, r);
-
             byte[] sel = new byte[] { 0x00, (byte) 0xA4, 0x04, 0x00, 0x07,
                     (byte) 0xA0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10, 0x00 };
             r = enviar(sel, 1);
-            if (r == null) { log("SELECT falló (" + ultimoEstado + ")"); return; }
+            if (r == null) { log("SELECT falló"); return; }
             todo.write(r, 0, r.length);
-            imprimirTag("nombre app", 0x50, r);
             log("tiene 9F38 (PDOL): " + contiene(r, new byte[] { (byte) 0x9F, 0x38 }));
-
             byte[] gpo = new byte[] { (byte) 0x80, (byte) 0xA8, 0x00, 0x00, 0x02, (byte) 0x83, 0x00, 0x00 };
             r = enviar(gpo, 1);
-            if (r == null) { log("GPO falló (" + ultimoEstado + ")"); return; }
+            if (r == null) { log("GPO falló"); return; }
             todo.write(r, 0, r.length);
             imprimirTag("AIP", 0x82, r);
-
             byte[] afl = buscarTag(r, 0x94);
             if (afl != null) {
                 log("AFL: " + Pn532Protocol.hex(afl));
@@ -549,13 +646,11 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     for (int rec = desde; rec <= hasta; rec++) {
                         byte[] apdu = new byte[] { 0x00, (byte) 0xB2, (byte) rec, (byte) ((sfi << 3) | 4), 0x00 };
                         byte[] rr = leerRegistro(apdu, 1);
-                        if (rr == null) { log("  SFI " + sfi + " rec " + rec + " falló (" + ultimoEstado + ")"); continue; }
+                        if (rr == null) { log("  SFI " + sfi + " rec " + rec + " falló"); continue; }
                         todo.write(rr, 0, rr.length);
-                        log("  SFI " + sfi + " rec " + rec + " ok " + rr.length + " bytes");
                     }
                 }
             }
-
             byte[] todos = todo.toByteArray();
             imprimirTag("PAN 5A", 0x5A, todos);
             imprimirTag("pista2 57", 0x57, todos);
@@ -591,25 +686,40 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         return d.length > n ? s + " …(" + d.length + " bytes)" : s;
     }
 
-    private void showStatus(String texto) {
-        runOnUiThread(() -> statusText.setText(texto));
-    }
-
     @Override public void onLog(String texto) {
         log(texto);
     }
 
     private void log(String mensaje) {
-        runOnUiThread(() -> {
-            logBuffer.append(mensaje).append('\n');
-            if (logBuffer.length() > 16000) logBuffer.delete(0, logBuffer.length() - 8000);
-            logText.setText(logBuffer.toString());
-        });
+        synchronized (logPendiente) {
+            logPendiente.append(mensaje).append('\n');
+        }
+        if (!flushAgendado) {
+            flushAgendado = true;
+            ui.postDelayed(this::volcar, 120);
+        }
+    }
+
+    private void volcar() {
+        flushAgendado = false;
+        String nuevo;
+        synchronized (logPendiente) {
+            nuevo = logPendiente.toString();
+            logPendiente.setLength(0);
+        }
+        if (nuevo.isEmpty()) return;
+        logBuffer.append(nuevo);
+        if (logBuffer.length() > 16000) logBuffer.delete(0, logBuffer.length() - 8000);
+        logText.setText(logBuffer.toString());
+        scrollLog.post(() -> scrollLog.fullScroll(ScrollView.FOCUS_DOWN));
     }
 
     @Override protected void onDestroy() {
-        detenerTodo();
+        I = null;
+        pararInterno();
         pn532.cerrar();
+        trabajo.shutdownNow();
+        ui.removeCallbacksAndMessages(null);
         try { unregisterReceiver(permissionReceiver); } catch (Exception ignored) { }
         super.onDestroy();
     }
