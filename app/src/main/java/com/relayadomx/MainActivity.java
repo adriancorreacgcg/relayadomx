@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ScrollView;
@@ -44,6 +45,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private TextView brokerEstado;
     private TextView enlaceEstado;
     private TextView tarjetaEstado;
+    private TextView tarjetaDatos;
     private TextView txEstado;
     private TextView cardInfo;
     private TextView logText;
@@ -69,6 +71,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private volatile String broker = "apagado";
     private volatile boolean enlazado;
     private volatile boolean tarjetaLista;
+    private volatile String datosTarjeta = "";
     private volatile boolean tx;
     private volatile long txUltima;
     private Thread hiloRelay;
@@ -110,6 +113,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         brokerEstado = findViewById(R.id.brokerEstado);
         enlaceEstado = findViewById(R.id.enlaceEstado);
         tarjetaEstado = findViewById(R.id.tarjetaEstado);
+        tarjetaDatos = findViewById(R.id.tarjetaDatos);
         txEstado = findViewById(R.id.txEstado);
         cardInfo = findViewById(R.id.cardInfo);
         logText = findViewById(R.id.logText);
@@ -124,12 +128,19 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         pn532 = new Pn532();
         lector = new Lector(this, this);
 
+        findViewById(R.id.modoPagarButton).setOnClickListener(v -> tocarModo(PAGAR));
+        findViewById(R.id.modoTarjetaButton).setOnClickListener(v -> tocarModo(TARJETA));
+        findViewById(R.id.apduButton).setOnClickListener(v -> {
+            if (scrollLog.getVisibility() == View.VISIBLE) {
+                scrollLog.setVisibility(View.GONE);
+            } else {
+                scrollLog.setVisibility(View.VISIBLE);
+            }
+        });
         findViewById(R.id.connectButton).setOnClickListener(v -> {
             if (pn532.abierto()) { detenerTodo(); pn532.cerrar(); log("Sin conexión USB"); }
             else conectar();
         });
-        findViewById(R.id.modoPagarButton).setOnClickListener(v -> tocarModo(PAGAR));
-        findViewById(R.id.modoTarjetaButton).setOnClickListener(v -> tocarModo(TARJETA));
         findViewById(R.id.aprenderButton).setOnClickListener(v -> iniciarAprender());
         findViewById(R.id.subirAtcButton).setOnClickListener(v -> subirAtc(1000));
         findViewById(R.id.relayButton).setOnClickListener(v -> iniciarRelay());
@@ -167,22 +178,22 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     : modo == TARJETA ? "Modo: TARJETA seleccionado"
                     : "Modo: ninguno");
             brokerEstado.setText("Broker: " + broker);
-            brokerEstado.setTextColor(broker.startsWith("conectado") ? 0xFF2E7D32
-                    : broker.startsWith("sin") ? 0xFFC62828 : 0xFF6D4C41);
+            brokerEstado.setTextColor(broker.startsWith("conectado") ? 0xFF2ECC71
+                    : broker.startsWith("sin") ? 0xFFFF5C5C : 0xFF8FB8DE);
             enlaceEstado.setText(modo == NINGUNO ? "Enlace: —"
-                    : enlazado ? "Enlace: ENLAZADO al otro teléfono"
+                    : enlazado ? "ENLACE LISTO"
                     : "Enlace: esperando al otro teléfono");
-            enlaceEstado.setTextColor(enlazado ? 0xFF2E7D32 : 0xFF6D4C41);
+            enlaceEstado.setTextColor(enlazado ? 0xFF2ECC71 : 0xFFFFB020);
             String t;
-            if (modo == TARJETA) t = "Tarjeta: " + (tarjetaLista ? "lista" : "sin tarjeta");
-            else if (modo == PAGAR) t = "Tarjeta: " + (enlazado
-                    ? (tarjetaLista ? "lista en el otro teléfono" : "sin tarjeta en el otro teléfono")
-                    : "—");
+            if (modo == TARJETA) t = "Tarjeta: " + (tarjetaLista ? "PRESENTADA" : "sin tarjeta");
+            else if (modo == PAGAR) t = "Tarjeta: " + (tarjetaLista
+                    ? "LISTA EN EL OTRO TELÉFONO" : "sin tarjeta en el otro teléfono");
             else t = "Tarjeta: —";
             tarjetaEstado.setText(t);
-            tarjetaEstado.setTextColor(tarjetaLista ? 0xFF2E7D32 : 0xFF6D4C41);
+            tarjetaEstado.setTextColor(tarjetaLista ? 0xFF2ECC71 : 0xFF8FB8DE);
+            tarjetaDatos.setText(datosTarjeta);
             txEstado.setText(tx ? "Transacción: EN CURSO" : "Transacción: esperando");
-            txEstado.setTextColor(tx ? 0xFFC62828 : 0xFF6D4C41);
+            txEstado.setTextColor(tx ? 0xFFFF5C5C : 0xFF8FB8DE);
         });
     }
 
@@ -215,6 +226,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                 broker = "conectando…";
                 enlazado = false;
                 tarjetaLista = false;
+                datosTarjeta = "";
                 tx = false;
                 render();
                 Puente.I.activar();
@@ -274,6 +286,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         modo = NINGUNO;
         enlazado = false;
         tarjetaLista = false;
+        datosTarjeta = "";
         tx = false;
         broker = "apagado";
         render();
@@ -294,7 +307,27 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         render();
     }
 
+    @Override public void onTarjetaDatos(String marca, String pan, String venc) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(marca);
+        if (pan != null && pan.length() >= 4) {
+            sb.append("  ···· ").append(pan.substring(pan.length() - 4));
+        }
+        if (venc != null && !venc.isEmpty()) sb.append("   vence ").append(venc);
+        datosTarjeta = sb.toString();
+        render();
+    }
+
     @Override public void onAviso(String texto) {
+        if ("tarjeta lista".equals(texto)) {
+            tarjetaLista = true;
+            Remoto.I.tarjetaLocal(true);
+            render();
+        } else if ("tarjeta fuera".equals(texto)) {
+            tarjetaLista = false;
+            Remoto.I.tarjetaLocal(false);
+            render();
+        }
         log(texto);
     }
 
