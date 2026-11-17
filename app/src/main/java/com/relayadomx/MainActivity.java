@@ -7,7 +7,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Color;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.nfc.NfcAdapter;
@@ -684,10 +683,6 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         int n = Math.min(d.length, 24);
         String s = Pn532Protocol.hex(Arrays.copyOfRange(d, 0, n));
         return d.length > n ? s + " …(" + d.length + " bytes)" : s;
-    }
-
-    @Override public void onLog(String texto) {
-        log(texto);
     }
 
     private void log(String mensaje) {
