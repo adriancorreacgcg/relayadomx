@@ -31,14 +31,15 @@ public final class Remoto implements MqttCallbackExtended {
     public static volatile Log registro;
 
     private static final String[] BROKERS = {
-            "ssl://broker.emqx.io:8883",
-            "ssl://test.mosquitto.org:8883",
-            "ssl://broker.hivemq.com:8883"
+            "ssl://broker.hivemq.com:8883",
+            "tcp://broker.hivemq.com:1883",
+            "ssl://mqtt.eclipseprojects.io:8883",
+            "ssl://test.mosquitto.org:8883"
     };
 
     private static final long VIGENCIA_PAR = 9000;
     private static final long ESPERA_BROKER = 900;
-    private static final long ESPERA_ENLACE = 12000;
+    private static final long ESPERA_ENLACE = 10000;
 
     private MqttAsyncClient cli;
     private String base;
@@ -92,7 +93,7 @@ public final class Remoto implements MqttCallbackExtended {
         id = "v" + Long.toHexString(azar.nextLong() & 0xFFFFFFFFFFFFL) + (pagar ? "a" : "b");
         final String broker = BROKERS[indice];
         avisarBroker("conectando… " + (indice + 1) + "/" + BROKERS.length);
-        reg("conectando a " + broker);
+        reg("conectando a " + broker + " como " + id);
         new Thread(() -> {
             try {
                 MqttAsyncClient c = new MqttAsyncClient(broker, id, new MemoryPersistence());
@@ -225,8 +226,8 @@ public final class Remoto implements MqttCallbackExtended {
 
     private void publicarSaludo() {
         if (!activo) return;
-        publicar("h/" + (pagar ? "a" : "b"), "1");
-        reg("saludo enviado h/" + (pagar ? "a" : "b"));
+        publicar("h/" + (pagar ? "a" : "b"), id);
+        reg("saludo enviado h/" + (pagar ? "a" : "b") + " = " + id);
     }
 
     private void latir() {
@@ -257,8 +258,10 @@ public final class Remoto implements MqttCallbackExtended {
         if (tema == null || base == null || !tema.startsWith(base)) return;
         final String t = tema.substring(base.length());
         final String p = new String(m.getPayload());
-        reg("recv " + t + " = " + p);
+        boolean propio = p.equals(id);
+        reg("recv " + t + " = " + p + (propio ? "  [eco propio]" : "  [DEL OTRO TELÉFONO]"));
         if (t.startsWith("h/")) {
+            if (propio) return;
             if ((pagar && t.equals("h/b")) || (!pagar && t.equals("h/a"))) {
                 ultimoPar = System.currentTimeMillis();
                 if (!par) {
@@ -270,14 +273,14 @@ public final class Remoto implements MqttCallbackExtended {
             return;
         }
         if (t.equals("c")) {
-            if (pagar) avisarTarjetaRemota("1".equals(p));
+            if (pagar && !propio) avisarTarjetaRemota("1".equals(p));
             return;
         }
-        if (t.equals("q") && !pagar) {
+        if (t.equals("q") && !pagar && !propio) {
             colaTarjeta.execute(() -> atender(p));
             return;
         }
-        if (t.equals("r") && pagar) respuestas.offer(p);
+        if (t.equals("r") && pagar && !propio) respuestas.offer(p);
     }
 
     private void atender(String p) {
