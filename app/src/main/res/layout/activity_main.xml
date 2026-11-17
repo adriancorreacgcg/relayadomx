@@ -1,162 +1,209 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="RelayadoMx"
+        android:textStyle="bold"
+        android:textSize="20sp" />
+
+    <EditText
+        android:id="@+id/claveText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="clave"
+        android:inputType="text"
+        android:text="m4xq9vt2r7kdp3wz"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:paddingBottom="12dp"
+        android:text="Detenido"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/modoPagarButton"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="MODO PAGAR"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/modoTarjetaButton"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_marginTop="10dp"
+        android:text="MODO TARJETA"
+        android:textSize="18sp" />
+
+    <!-- ===== oculto ===== -->
+
+    <Button
+        android:id="@+id/connectButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:text="Conectar USB" />
+
+    <Button
+        android:id="@+id/relayButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:text="Relay" />
+
+    <Button
+        android:id="@+id/aprenderButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:text="Aprender" />
+
+    <Button
+        android:id="@+id/subirAtcButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:text="Subir ATC 1000" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
-
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="16sp"
-            android:text="Sin modo" />
-
-        <EditText
-            android:id="@+id/claveText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Clave del túnel"
-            android:inputType="text"
-            android:maxLength="12"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/modoPagarButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="MODO PAGAR (va al cajero)" />
-
-        <Button
-            android:id="@+id/modoTarjetaButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="MODO TARJETA (tiene la tarjeta)" />
-
-        <EditText
-            android:id="@+id/panText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="PAN 16 dígitos"
-            android:inputType="number"
-            android:maxLength="16"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/vencText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Vencimiento AAMM"
-            android:inputType="number"
-            android:maxLength="4"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/servicioText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Servicio"
-            android:inputType="number"
-            android:maxLength="3"
-            android:text="201"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/connectButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Conectar / Desconectar USB" />
-
-        <Button
-            android:id="@+id/aprenderButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Aprender tarjeta (USB)" />
-
-        <Button
-            android:id="@+id/subirAtcButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Subir ATC 1000 (USB)" />
-
-        <Button
-            android:id="@+id/relayButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Relay USB local" />
+        android:orientation="horizontal"
+        android:visibility="gone">
 
         <Button
             android:id="@+id/estaticoButton"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Modo 1 estático" />
+            android:layout_weight="1"
+            android:text="M1" />
 
         <Button
             android:id="@+id/estatico2Button"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Modo 2 banda AIP 19 80" />
+            android:layout_weight="1"
+            android:text="M2" />
 
         <Button
             android:id="@+id/estatico3Button"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Modo 3 banda AIP 18 00" />
+            android:layout_weight="1"
+            android:text="M3" />
 
         <Button
             android:id="@+id/estatico4Button"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Modo 4 TC offline + ATC" />
+            android:layout_weight="1"
+            android:text="M4" />
 
         <Button
             android:id="@+id/estatico5Button"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Modo 5 ARQC + ATC" />
+            android:layout_weight="1"
+            android:text="M5" />
+    </LinearLayout>
 
-        <Button
-            android:id="@+id/stopButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Detener" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone">
 
         <Button
             android:id="@+id/firmwareButton"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Capturar tarjeta" />
+            android:layout_weight="1"
+            android:text="Firmware" />
 
         <Button
             android:id="@+id/volcarButton"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="Ver guardado" />
 
         <Button
-            android:id="@+id/clearButton"
-            android:layout_width="match_parent"
+            android:id="@+id/stopButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Limpiar registro" />
+            android:layout_weight="1"
+            android:text="Detener" />
 
-        <TextView
-            android:id="@+id/cardInfo"
-            android:layout_width="match_parent"
+        <Button
+            android:id="@+id/clearButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
-            android:textSize="14sp" />
+            android:layout_weight="1"
+            android:text="Limpiar" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/panText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="3"
+            android:hint="PAN"
+            android:inputType="number" />
+
+        <EditText
+            android:id="@+id/vencText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="MMAA"
+            android:inputType="number" />
+
+        <EditText
+            android:id="@+id/servicioText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="201"
+            android:inputType="number" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/cardInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:textSize="12sp" />
+
+    <!-- ===== log ===== -->
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp">
 
         <TextView
             android:id="@+id/logText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:textIsSelectable="true" />
+            android:fontFamily="monospace"
+            android:textSize="10sp" />
+    </ScrollView>
 
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>
