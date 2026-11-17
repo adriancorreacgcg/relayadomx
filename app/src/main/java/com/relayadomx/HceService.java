@@ -12,13 +12,19 @@ public class HceService extends HostApduService {
     private static int extra = 0;
 
     @Override public byte[] processCommandApdu(byte[] apdu, Bundle extras) {
-        if (!Puente.I.activo() && !Remoto.I.activo()) return NO_ACTIVO;
+        Puente.I.anotar("> " + Pn532Protocol.hex(apdu));
+        MainActivity a = MainActivity.I;
+        if (a != null) a.apduEntrante();
 
-        if (Remoto.I.activo()) {
+        if (Remoto.I.tunel()) {
             byte[] r = Remoto.I.enviar(apdu, 2000);
-            Puente.I.anotar("> " + Pn532Protocol.hex(apdu));
             Puente.I.anotar("< " + Pn532Protocol.hex(r));
             return r;
+        }
+
+        if (!Puente.I.activo()) {
+            Puente.I.anotar("< 6F00 servicio apagado");
+            return NO_ACTIVO;
         }
 
         if (Puente.I.estatico()) {
@@ -38,7 +44,6 @@ public class HceService extends HostApduService {
                 if (ins == 0xAE && (modo == 4 || modo == 5)) r = ajustar(r, modo);
             }
             r = Datos.aplicar(r);
-            Puente.I.anotar("> " + Pn532Protocol.hex(apdu));
             Puente.I.anotar("< " + Pn532Protocol.hex(r));
             return r;
         }
