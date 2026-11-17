@@ -1,0 +1,61 @@
+name: Compilar y publicar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK del runner
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compilar APK instalable
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Dar nombre al APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk 'PN532-USB-Reader-v0.1.${{ github.run_number }}.apk'
+
+      - name: Guardar APK en Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: PN532-USB-Reader
+          path: PN532-USB-Reader-*.apk
+
+      - name: Publicar en Releases (Latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 'v0.1.${{ github.run_number }}'
+          name: 'PN532 USB Reader v0.1.${{ github.run_number }}'
+          body: |
+            APK de pruebas para CP210x + PN532 Elechouse V3.
+            Compilación automática de GitHub Actions.
+            Firmada con la clave debug de GitHub Actions, no apta para distribución de producción.
+          prerelease: false
+          make_latest: true
+          files: PN532-USB-Reader-*.apk
