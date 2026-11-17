@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">RelayadoMx</string>
+    <string name="servicio">Relay NFC</string>
+    <string name="grupo">Pagos</string>
+</resources>
