@@ -3,8 +3,8 @@ package com.relayadomx;
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
-import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
@@ -40,7 +40,7 @@ public final class Remoto implements MqttCallbackExtended {
     private static final long ESPERA_BROKER = 900;
     private static final long ESPERA_ENLACE = 12000;
 
-    private MqttClient cli;
+    private MqttAsyncClient cli;
     private String base;
     private String id;
     private volatile boolean pagar;
@@ -95,7 +95,7 @@ public final class Remoto implements MqttCallbackExtended {
         reg("conectando a " + broker);
         new Thread(() -> {
             try {
-                MqttClient c = new MqttClient(broker, id, new MemoryPersistence());
+                MqttAsyncClient c = new MqttAsyncClient(broker, id, new MemoryPersistence());
                 MqttConnectOptions o = new MqttConnectOptions();
                 o.setCleanSession(true);
                 o.setConnectionTimeout(8);
@@ -104,7 +104,15 @@ public final class Remoto implements MqttCallbackExtended {
                 c.setCallback(Remoto.this);
                 if (gen != generacion) { c.close(); return; }
                 cli = c;
-                c.connect(o);
+                c.connect(o, null, new IMqttActionListener() {
+                    @Override public void onSuccess(IMqttToken t) { }
+                    @Override public void onFailure(IMqttToken t, Throwable e) {
+                        if (gen != generacion) return;
+                        String m = e == null ? "?" : e.getMessage();
+                        avisarBroker("sin conexión " + (indice + 1) + "/" + BROKERS.length + ": " + m);
+                        reg("fallo " + broker + ": " + m);
+                    }
+                });
             } catch (Exception ex) {
                 if (gen == generacion) {
                     avisarBroker("sin conexión " + (indice + 1) + "/" + BROKERS.length
@@ -125,7 +133,7 @@ public final class Remoto implements MqttCallbackExtended {
     public void tarjetaLocal(boolean lista) {
         if (tarjetaLocal == lista) return;
         tarjetaLocal = lista;
-        publicar("c", lista ? "1" : "0", null);
+        publicar("c", lista ? "1" : "0");
     }
 
     public void desconectar() {
@@ -140,18 +148,18 @@ public final class Remoto implements MqttCallbackExtended {
     }
 
     private void cerrar() {
-        MqttClient c = cli;
+        MqttAsyncClient c = cli;
         cli = null;
         if (c == null) return;
         try { c.disconnectForcibly(150, 150); } catch (Exception ignored) { }
         try { c.close(); } catch (Exception ignored) { }
     }
 
-    private void publicar(String sufijo, String texto, IMqttActionListener quien) {
-        MqttClient c = cli;
+    private void publicar(String sufijo, String texto) {
+        MqttAsyncClient c = cli;
         if (c == null || !activo) return;
         try {
-            c.publish(base + sufijo, texto.getBytes(), 0, false, null, quien);
+            c.publish(base + sufijo, texto.getBytes(), 0, false, null, null);
         } catch (Exception e) {
             reg("publicar " + sufijo + " falló: " + e.getMessage());
         }
@@ -162,7 +170,7 @@ public final class Remoto implements MqttCallbackExtended {
         while (!activo && System.currentTimeMillis() < limite) {
             try { Thread.sleep(30); } catch (InterruptedException e) { break; }
         }
-        MqttClient c = cli;
+        MqttAsyncClient c = cli;
         if (!activo || c == null) {
             reg("< 6F00 · sin enlace");
             return new byte[] { 0x6F, 0x00 };
@@ -190,7 +198,7 @@ public final class Remoto implements MqttCallbackExtended {
     }
 
     @Override public void connectComplete(boolean reconexion, String uri) {
-        final MqttClient c = cli;
+        final MqttAsyncClient c = cli;
         if (c == null) return;
         final boolean recon = reconexion;
         try {
@@ -204,8 +212,9 @@ public final class Remoto implements MqttCallbackExtended {
                     latir();
                 }
                 @Override public void onFailure(IMqttToken t, Throwable e) {
-                    avisarBroker("sin conexión: " + (e == null ? "?" : e.getMessage()));
-                    reg("suscripción falló: " + (e == null ? "?" : e.getMessage()));
+                    String m = e == null ? "?" : e.getMessage();
+                    avisarBroker("sin conexión: " + m);
+                    reg("suscripción falló: " + m);
                 }
             });
         } catch (Exception e) {
@@ -216,7 +225,7 @@ public final class Remoto implements MqttCallbackExtended {
 
     private void publicarSaludo() {
         if (!activo) return;
-        publicar("h/" + (pagar ? "a" : "b"), "1", null);
+        publicar("h/" + (pagar ? "a" : "b"), "1");
         reg("saludo enviado h/" + (pagar ? "a" : "b"));
     }
 
@@ -232,7 +241,7 @@ public final class Remoto implements MqttCallbackExtended {
                     return;
                 }
                 publicarSaludo();
-                if (!pagar) publicar("c", tarjetaLocal ? "1" : "0", null);
+                if (!pagar) publicar("c", tarjetaLocal ? "1" : "0");
                 if (par && System.currentTimeMillis() - ultimoPar > VIGENCIA_PAR) {
                     par = false;
                     avisarPar(false);
@@ -280,7 +289,7 @@ public final class Remoto implements MqttCallbackExtended {
                 : lector.enviar(apdu);
         long dt = System.currentTimeMillis() - t0;
         reg("< " + Aprendiz.hex(resp) + " · " + dt + " ms");
-        publicar("r", Aprendiz.hex(resp), null);
+        publicar("r", Aprendiz.hex(resp));
     }
 
     @Override public void connectionLost(Throwable c) {
