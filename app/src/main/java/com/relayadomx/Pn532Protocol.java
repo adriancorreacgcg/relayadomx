@@ -1,4 +1,4 @@
-package com.pn532.usbreader;
+package com.relayadomx;
 
 import java.util.ArrayList;
 import java.util.Arrays;
