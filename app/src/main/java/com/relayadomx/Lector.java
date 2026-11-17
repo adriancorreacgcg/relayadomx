@@ -13,11 +13,16 @@ public final class Lector implements NfcAdapter.ReaderCallback {
 
     private final Activity act;
     private final Aviso aviso;
-    private IsoDep iso;
+    private volatile IsoDep iso;
 
     public Lector(Activity a, Aviso av) {
         act = a;
         aviso = av;
+    }
+
+    public boolean lista() {
+        IsoDep d = iso;
+        return d != null && d.isConnected();
     }
 
     public void iniciar() {
@@ -52,11 +57,15 @@ public final class Lector implements NfcAdapter.ReaderCallback {
 
     public synchronized byte[] enviar(byte[] apdu) {
         IsoDep d = iso;
-        if (d == null || !d.isConnected()) return new byte[] { 0x6A, (byte) 0x82 };
+        if (d == null || !d.isConnected()) {
+            aviso.onAviso("tarjeta fuera");
+            return new byte[] { 0x6A, (byte) 0x82 };
+        }
         try {
             return d.transceive(apdu);
         } catch (Exception e) {
-            aviso.onAviso("fallo tarjeta: " + e.getMessage());
+            iso = null;
+            aviso.onAviso("tarjeta fuera");
             return new byte[] { 0x6F, 0x00 };
         }
     }
