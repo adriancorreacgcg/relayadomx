@@ -2,15 +2,31 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="#0B1B2B"
     android:orientation="vertical"
     android:padding="12dp">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="RelayadoMx"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="RelayadoMx"
+            android:textColor="#E6EDF3"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:contentDescription="logo"
+            android:src="@drawable/logo" />
+    </LinearLayout>
 
     <EditText
         android:id="@+id/claveText"
@@ -19,6 +35,8 @@
         android:hint="clave"
         android:inputType="text"
         android:text="m4xq9vt2r7kdp3wz"
+        android:textColor="#E6EDF3"
+        android:textColorHint="#5B7083"
         android:textSize="15sp" />
 
     <LinearLayout
@@ -32,7 +50,9 @@
             android:layout_width="0dp"
             android:layout_height="56dp"
             android:layout_weight="1"
+            android:backgroundTint="#1B3A57"
             android:text="MODO PAGAR"
+            android:textColor="#E6EDF3"
             android:textSize="15sp" />
 
         <Button
@@ -41,46 +61,102 @@
             android:layout_height="56dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
+            android:backgroundTint="#1B3A57"
             android:text="MODO TARJETA"
+            android:textColor="#E6EDF3"
             android:textSize="15sp" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/modoEstado"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:background="#13293D"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <TextView
+            android:id="@+id/modoEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Modo: ninguno"
+            android:textColor="#E6EDF3"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/brokerEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Broker: apagado"
+            android:textColor="#E6EDF3"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/enlaceEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enlace: —"
+            android:textColor="#E6EDF3"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tarjetaEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tarjeta: —"
+            android:textColor="#E6EDF3"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tarjetaDatos"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#4C9AFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/txEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Transacción: esperando"
+            android:textColor="#E6EDF3"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/apduButton"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
         android:layout_marginTop="8dp"
-        android:text="Modo: ninguno"
-        android:textSize="13sp"
-        android:textStyle="bold" />
+        android:backgroundTint="#13293D"
+        android:text="MOSTRAR TRANSACCIÓN APDU"
+        android:textColor="#8FB8DE"
+        android:textSize="12sp" />
 
-    <TextView
-        android:id="@+id/brokerEstado"
+    <ScrollView
+        android:id="@+id/scrollLog"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Broker: apagado"
-        android:textSize="13sp" />
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:background="#08131F"
+        android:visibility="gone">
 
-    <TextView
-        android:id="@+id/enlaceEstado"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Enlace: —"
-        android:textSize="13sp" />
+        <TextView
+            android:id="@+id/logText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:padding="6dp"
+            android:textColor="#9FB3C8"
+            android:textSize="10sp" />
+    </ScrollView>
 
-    <TextView
-        android:id="@+id/tarjetaEstado"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Tarjeta: —"
-        android:textSize="13sp" />
-
-    <TextView
-        android:id="@+id/txEstado"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Transacción: esperando"
-        android:textSize="13sp" />
+    <!-- ===== oculto ===== -->
 
     <Button
         android:id="@+id/connectButton"
@@ -166,20 +242,5 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:visibility="gone" />
-
-    <ScrollView
-        android:id="@+id/scrollLog"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:layout_weight="1">
-
-        <TextView
-            android:id="@+id/logText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="10sp" />
-    </ScrollView>
 
 </LinearLayout>
