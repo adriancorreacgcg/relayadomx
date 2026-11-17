@@ -44,6 +44,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private volatile boolean relay;
     private volatile boolean estatico;
     private volatile boolean aprender;
+    private volatile int genDren;
     private Thread hiloRelay;
     private UsbDevice pendiente;
     private volatile int ultimoEstado = -1;
@@ -64,6 +65,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
+        Remoto.registro = this::log;
         Aprendiz.iniciar(this);
         Datos.iniciar(this);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
@@ -121,29 +123,36 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
 
     private void modoPagar() {
         detenerTodo();
-        try {
-            Puente.I.activar();
-            preferir(true);
-            Remoto.I.conectar(clave(), true, null, this);
-            showStatus("Modo pagar · esperando par");
-            log("Modo pagar con clave " + clave() + ", esperando al otro teléfono");
-        } catch (Exception e) {
-            showStatus("Error de red: " + e.getMessage());
-            log("Error de red: " + e.getMessage());
-        }
+        Puente.I.activar();
+        preferir(true);
+        drenar();
+        Remoto.I.conectar(clave(), true, null, this);
+        showStatus("Modo pagar · esperando par");
+        log("Modo pagar con clave " + clave() + ", esperando al otro teléfono");
     }
 
     private void modoTarjeta() {
         detenerTodo();
         lector.iniciar();
-        try {
-            Remoto.I.conectar(clave(), false, lector, this);
-            showStatus("Modo tarjeta · acerca la tarjeta al teléfono");
-            log("Modo tarjeta con clave " + clave() + ", pon la tarjeta atrás");
-        } catch (Exception e) {
-            showStatus("Error de red: " + e.getMessage());
-            log("Error de red: " + e.getMessage());
-        }
+        drenar();
+        Remoto.I.conectar(clave(), false, lector, this);
+        showStatus("Modo tarjeta · acerca la tarjeta al teléfono");
+        log("Modo tarjeta con clave " + clave() + ", pon la tarjeta atrás");
+    }
+
+    private void drenar() {
+        final int g = ++genDren;
+        new Thread(() -> {
+            while (g == genDren) {
+                String s = Puente.I.sacarBitacora();
+                if (!s.isEmpty()) log(s.trim());
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "drenar").start();
     }
 
     @Override public void onAviso(String texto) {
@@ -287,6 +296,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private void detenerTodo() {
         relay = false;
         estatico = false;
+        genDren++;
         Puente.I.desactivar();
         Remoto.I.desconectar();
         try { lector.detener(); } catch (Exception ignored) { }
