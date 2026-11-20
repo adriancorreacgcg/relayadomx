@@ -183,6 +183,7 @@ public final class Remoto implements MqttCallbackExtended {
     public void limpiarAprobado() {
         if (ultimoAprobado == 0) return;
         ultimoAprobado = 0;
+        publicar("k", "0");
         avisarAprobado();
     }
 
@@ -333,7 +334,7 @@ public final class Remoto implements MqttCallbackExtended {
         }
         if (t.equals("k")) {
             if (propio) return;
-            ultimoAprobado = System.currentTimeMillis();
+            ultimoAprobado = "0".equals(p) ? 0 : System.currentTimeMillis();
             avisarAprobado();
             return;
         }
