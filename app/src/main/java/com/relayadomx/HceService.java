@@ -18,6 +18,12 @@ public class HceService extends HostApduService {
 
         if (Remoto.I.tunel()) {
             byte[] r = Remoto.I.enviar(apdu, 2000);
+            if (a != null && apdu.length > 1 && (apdu[1] & 0xff) == 0xAE) {
+                boolean ok = r.length >= 2
+                        && (r[r.length - 2] & 0xff) == 0x90
+                        && (r[r.length - 1] & 0xff) == 0x00;
+                a.genAcVisto(ok);
+            }
             Puente.I.anotar("< " + Pn532Protocol.hex(r));
             return r;
         }
@@ -75,5 +81,8 @@ public class HceService extends HostApduService {
         return c;
     }
 
-    @Override public void onDeactivated(int reason) { }
+    @Override public void onDeactivated(int reason) {
+        MainActivity a = MainActivity.I;
+        if (a != null && Remoto.I.tunel()) a.transaccionFin();
+    }
 }
