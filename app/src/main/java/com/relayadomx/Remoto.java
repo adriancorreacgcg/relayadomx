@@ -49,7 +49,7 @@ public final class Remoto implements MqttCallbackExtended {
 
     private static final long VIGENCIA_PAR = 4000;
     private static final long VIGENCIA_TARJETA = 6000;
-    private static final long ESPERA_ENLACE = 12000;
+    private static final long ESPERA_ENLACE = 14000;
 
     private MqttAsyncClient cli;
     private String base;
@@ -61,6 +61,7 @@ public final class Remoto implements MqttCallbackExtended {
     private volatile boolean tarjetaLocal;
     private volatile int generacion;
     private volatile int indice;
+    private volatile int intento;
     private volatile long ultimoPar;
     private volatile long ultimaTarjeta;
     private volatile long desde;
@@ -86,7 +87,7 @@ public final class Remoto implements MqttCallbackExtended {
         return System.currentTimeMillis() - ultimaTarjeta < VIGENCIA_TARJETA;
     }
 
-    public void conectar(String codigo, boolean comoPagar, Lector l, Enlace e) {
+    public void conectar(String codigo, boolean comoPagar, Lector l, Enlace e, String equipo) {
         pagar = comoPagar;
         tunel = true;
         lector = l;
@@ -96,11 +97,14 @@ public final class Remoto implements MqttCallbackExtended {
         ultimaTarjeta = 0;
         activo = false;
         tarjetaLocal = false;
+        intento = 0;
         indice = 0;
         aid = "";
         datosEnviados = "";
         respuestas.clear();
-        base = "venice/emvrelay/" + codigo.toLowerCase() + "/";
+        base = "emvrelay/" + codigo.toLowerCase() + "/";
+        id = "eq" + equipo + (pagar ? "a" : "b");
+        reg("equipo " + id);
         latir();
         abrir();
     }
@@ -111,7 +115,6 @@ public final class Remoto implements MqttCallbackExtended {
         activo = false;
         par = false;
         desde = System.currentTimeMillis();
-        id = "v" + Long.toHexString(azar.nextLong() & 0xFFFFFFFFFFFFL) + (pagar ? "a" : "b");
         final String broker = BROKERS[indice];
         final String etiqueta = (indice + 1) + "/" + BROKERS.length;
         avisarServidor(CONECTANDO, "conectando " + etiqueta);
@@ -122,12 +125,12 @@ public final class Remoto implements MqttCallbackExtended {
             try {
                 c = new MqttAsyncClient(broker, id, new MemoryPersistence());
             } catch (Exception e) {
-                fallo(gen, "cliente: " + e.getMessage());
+                reintentar(gen, "cliente: " + e.getMessage());
                 return;
             }
             MqttConnectOptions o = new MqttConnectOptions();
             o.setCleanSession(true);
-            o.setConnectionTimeout(6);
+            o.setConnectionTimeout(8);
             o.setKeepAliveInterval(30);
             o.setAutomaticReconnect(false);
             c.setCallback(Remoto.this);
@@ -140,25 +143,27 @@ public final class Remoto implements MqttCallbackExtended {
                 c.connect(o, null, new IMqttActionListener() {
                     @Override public void onSuccess(IMqttToken t) { }
                     @Override public void onFailure(IMqttToken t, Throwable e) {
-                        fallo(gen, e == null ? "?" : e.getMessage());
+                        reintentar(gen, e == null ? "?" : e.getMessage());
                     }
                 });
             } catch (Exception e) {
-                fallo(gen, e.getMessage());
+                reintentar(gen, e.getMessage());
             }
         }, "mqtt-conectar").start();
     }
 
-    private void fallo(int gen, String motivo) {
+    private void reintentar(int gen, String motivo) {
         if (gen != generacion || !tunel) return;
-        reg("fallo " + BROKERS[indice] + ": " + motivo);
-        avisarServidor(SIN_SERVIDOR, "sin servidor · " + motivo);
+        intento++;
+        long espera = Math.min(1500L * intento, 8000L);
+        reg("fallo: " + motivo + " · reintento en " + espera + " ms");
+        avisarServidor(SIN_SERVIDOR, "sin servidor");
         new Thread(() -> {
-            try { Thread.sleep(1200); } catch (InterruptedException e) { return; }
+            try { Thread.sleep(espera); } catch (InterruptedException e) { return; }
             if (gen != generacion || !tunel) return;
             indice = (indice + 1) % BROKERS.length;
             abrir();
-        }, "mqtt-saltar").start();
+        }, "mqtt-espera").start();
     }
 
     public void tarjetaLocal(boolean lista) {
@@ -242,19 +247,20 @@ public final class Remoto implements MqttCallbackExtended {
             c.subscribe(base + "#", 0, null, new IMqttActionListener() {
                 @Override public void onSuccess(IMqttToken t) {
                     activo = true;
+                    intento = 0;
                     desde = System.currentTimeMillis();
                     avisarServidor(CONECTADO, "conectado " + (indice + 1) + "/" + BROKERS.length);
-                    avisar(recon ? "reconectado al servidor" : "conectado al servidor");
+                    avisar(recon ? "reconectado" : "conectado");
                     publicarSaludo();
                 }
                 @Override public void onFailure(IMqttToken t, Throwable e) {
                     String m = e == null ? "?" : e.getMessage();
-                    avisarServidor(SIN_SERVIDOR, "suscripción rechazada · " + m);
+                    avisarServidor(SIN_SERVIDOR, "suscripción rechazada");
                     reg("suscripción falló: " + m);
                 }
             });
         } catch (Exception e) {
-            avisarServidor(SIN_SERVIDOR, "suscripción falló · " + e.getMessage());
+            avisarServidor(SIN_SERVIDOR, "suscripción falló");
             reg("suscripción falló: " + e.getMessage());
         }
     }
@@ -282,7 +288,7 @@ public final class Remoto implements MqttCallbackExtended {
                 }
                 if (!par && ahora - desde > ESPERA_ENLACE) {
                     desde = ahora;
-                    avisar("el otro teléfono no aparece, cambio de servidor");
+                    avisar("el otro teléfono no aparece");
                     indice = (indice + 1) % BROKERS.length;
                     abrir();
                 }
@@ -433,15 +439,14 @@ public final class Remoto implements MqttCallbackExtended {
         activo = false;
         par = false;
         avisarPar(false);
-        avisarServidor(SIN_SERVIDOR, "conexión perdida");
-        avisar("red perdida, cambiando de servidor");
+        avisarServidor(SIN_SERVIDOR, "sin servidor");
+        avisar("red perdida");
         final int gen = generacion;
         new Thread(() -> {
             try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
             if (gen != generacion || !tunel) return;
-            indice = (indice + 1) % BROKERS.length;
-            abrir();
-        }, "mqtt-saltar").start();
+            reintentar(gen, "conexión perdida");
+        }, "mqtt-espera").start();
     }
 
     @Override public void deliveryComplete(IMqttDeliveryToken t) { }
