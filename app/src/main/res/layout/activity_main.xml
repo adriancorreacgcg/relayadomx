@@ -89,6 +89,26 @@
             android:textSize="15sp" />
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/accesoEstado"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="Servicio: apagado"
+        android:textColor="#FF5C5C"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/activarButton"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:backgroundTint="#1B3A57"
+        android:text="ACTIVAR"
+        android:textColor="#E6EDF3"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
