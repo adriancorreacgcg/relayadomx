@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
@@ -16,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -24,9 +26,12 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -38,6 +43,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     public static volatile MainActivity I;
 
     private static final String USB_PERMISSION_ACTION = "com.relayadomx.USB_PERMISSION";
+    private static final String PREFS = "acceso";
     private static final int NINGUNO = 0;
     private static final int PAGAR = 1;
     private static final int TARJETA = 2;
@@ -53,6 +59,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private static final ColorStateList COLOR_FALLO = ColorStateList.valueOf(0xFF8C2F2F);
 
     private UsbManager usbManager;
+    private TextView accesoEstado;
     private TextView modoEstado;
     private TextView brokerEstado;
     private TextView enlaceEstado;
@@ -63,6 +70,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private TextView cardInfo;
     private TextView logText;
     private ScrollView scrollLog;
+    private Button activarButton;
     private Button aprobadoButton;
     private EditText panText;
     private EditText vencText;
@@ -91,6 +99,8 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private volatile long txUltima;
     private volatile boolean genAcOk;
     private volatile int resultado = ESPERA;
+    private volatile long hasta;
+    private volatile boolean esperando;
     private Thread hiloRelay;
     private UsbDevice pendiente;
     private volatile int ultimoEstado = -1;
@@ -100,6 +110,12 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
             if (tx && System.currentTimeMillis() - txUltima > 5000) {
                 tx = false;
                 if (resultado == CURSO) transaccionFin();
+            }
+            if (hasta != 0 && System.currentTimeMillis() >= hasta) {
+                hasta = 0;
+                guardarHasta(0);
+                trabajo.execute(MainActivity.this::pararInterno);
+                log("Se acabaron las 24 h");
             }
             render();
             ui.postDelayed(this, 1000);
@@ -127,6 +143,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         Aprendiz.iniciar(this);
         Datos.iniciar(this);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        accesoEstado = findViewById(R.id.accesoEstado);
         modoEstado = findViewById(R.id.modoEstado);
         brokerEstado = findViewById(R.id.brokerEstado);
         enlaceEstado = findViewById(R.id.enlaceEstado);
@@ -137,6 +154,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         cardInfo = findViewById(R.id.cardInfo);
         logText = findViewById(R.id.logText);
         scrollLog = findViewById(R.id.scrollLog);
+        activarButton = findViewById(R.id.activarButton);
         aprobadoButton = findViewById(R.id.aprobadoButton);
         panText = findViewById(R.id.panText);
         vencText = findViewById(R.id.vencText);
@@ -147,12 +165,14 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         servicioText.setText(Datos.servicio);
         pn532 = new Pn532();
         lector = new Lector(this, this);
+        hasta = getSharedPreferences(PREFS, MODE_PRIVATE).getLong("hasta", 0);
 
         findViewById(R.id.modoPagarButton).setOnClickListener(v -> tocarModo(PAGAR));
         findViewById(R.id.modoTarjetaButton).setOnClickListener(v -> tocarModo(TARJETA));
         findViewById(R.id.apduButton).setOnClickListener(v ->
                 scrollLog.setVisibility(scrollLog.getVisibility() == View.VISIBLE
                         ? View.GONE : View.VISIBLE));
+        activarButton.setOnClickListener(v -> pedirActivacion());
         aprobadoButton.setOnClickListener(v -> {
             resultado = ESPERA;
             genAcOk = false;
@@ -189,13 +209,81 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         } else {
             registerReceiver(permissionReceiver, filter);
         }
+
         render();
         ui.postDelayed(latidoTx, 1000);
         log("Elige modo y usa la misma clave en los dos teléfonos.");
     }
 
+    private String equipo() {
+        String id = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        if (id == null) id = "0000000000000000";
+        int h = 0x811C9DC5;
+        for (int i = 0; i < id.length(); i++) {
+            h ^= id.charAt(i);
+            h *= 0x01000193;
+        }
+        return String.format("%08d", (h & 0xFFFFFFFFL) % 100000000L);
+    }
+
+    boolean habilitado() {
+        return hasta != 0 && System.currentTimeMillis() < hasta;
+    }
+
+    private void guardarHasta(long valor) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("hasta", valor).apply();
+    }
+
+    private void pedirActivacion() {
+        if (esperando) return;
+        if (habilitado()) { log("Ya está activo"); return; }
+        if (!Notificador.listo()) { log("Falta configurar Telegram"); return; }
+        esperando = true;
+        final String eq = equipo();
+        final long desde = System.currentTimeMillis() / 1000L;
+        render();
+        Notificador.avisar("ACTIVAR · eq" + eq + " · " + Build.MODEL
+                + "\n" + new SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(new Date())
+                + "\n\nResponde: si eq" + eq);
+        log("Petición enviada, esperando aprobación");
+        new Thread(() -> {
+            long limite = System.currentTimeMillis() + 10 * 60000L;
+            while (esperando && System.currentTimeMillis() < limite) {
+                try { Thread.sleep(5000); } catch (InterruptedException e) { break; }
+                if (!esperando) return;
+                if (Notificador.aprobado(Notificador.ultimos(), eq, desde)) {
+                    esperando = false;
+                    hasta = System.currentTimeMillis() + 86400000L;
+                    guardarHasta(hasta);
+                    Notificador.avisar("ACTIVADO 24h · eq" + eq);
+                    log("Activado por 24 h");
+                    render();
+                    return;
+                }
+            }
+            if (esperando) {
+                esperando = false;
+                log("Sin respuesta de aprobación");
+                render();
+            }
+        }, "aprobar").start();
+    }
+
     private void render() {
         runOnUiThread(() -> {
+            long quedan = hasta - System.currentTimeMillis();
+            String reloj = quedan <= 0 ? ""
+                    : String.format(Locale.getDefault(), "%02d:%02d",
+                        (quedan / 60000L) / 60, (quedan / 60000L) % 60);
+            boolean dentro = quedan > 0;
+            accesoEstado.setText(esperando ? "Servicio: esperando aprobación"
+                    : dentro ? "Servicio: activo " + reloj
+                    : "Servicio: apagado");
+            accesoEstado.setTextColor(esperando ? 0xFFFFB020
+                    : dentro ? 0xFF2ECC71 : 0xFFFF5C5C);
+            activarButton.setEnabled(!esperando && !dentro);
+            activarButton.setText(dentro ? "ACTIVO" : esperando ? "ESPERANDO" : "ACTIVAR");
+
             modoEstado.setText(modo == PAGAR ? "Modo: PAGAR"
                     : modo == TARJETA ? "Modo: TARJETA" : "Modo: ninguno");
             modoEstado.setTextColor(modo == NINGUNO ? 0xFF8FB8DE : 0xFF4C9AFF);
@@ -267,6 +355,12 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         resultado = genAcOk ? APROBADA : NO_CONCLUIDA;
         genAcOk = false;
         Remoto.I.resultado(resultado);
+        if (modo == PAGAR) {
+            Notificador.avisar((resultado == APROBADA ? "APROBADA" : "DENEGADA")
+                    + " · eq" + equipo() + " · "
+                    + new SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(new Date())
+                    + (datosTarjeta.isEmpty() ? "" : "\n" + datosTarjeta));
+        }
         render();
     }
 
@@ -277,6 +371,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
 
     private void tocarModo(int cual) {
         if (arrancando) return;
+        if (!habilitado()) { pedirActivacion(); return; }
         if (modo == cual) { detenerTodo(); return; }
         arrancar(cual);
     }
@@ -304,7 +399,8 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     log("Modo pagar con clave " + clave + ", esperando al otro teléfono");
                 }
                 drenar();
-                Remoto.I.conectar(clave, cual == PAGAR, cual == TARJETA ? lector : null, this);
+                Remoto.I.conectar(clave, cual == PAGAR, cual == TARJETA ? lector : null,
+                        this, equipo());
             } catch (Exception e) {
                 log("Error al arrancar: " + e.getMessage());
             } finally {
