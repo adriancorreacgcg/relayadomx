@@ -16,9 +16,14 @@ public class HceService extends HostApduService {
         MainActivity a = MainActivity.I;
         if (a != null) a.apduEntrante();
 
+        if (a == null || !a.habilitado()) {
+            Puente.I.anotar("< 6A82 apagado");
+            return SIN_TARJETA;
+        }
+
         if (Remoto.I.tunel()) {
             byte[] r = Remoto.I.enviar(apdu, 2000);
-            if (a != null && apdu.length > 1 && (apdu[1] & 0xff) == 0xAE) {
+            if (apdu.length > 1 && (apdu[1] & 0xff) == 0xAE) {
                 boolean ok = r.length >= 2
                         && (r[r.length - 2] & 0xff) == 0x90
                         && (r[r.length - 1] & 0xff) == 0x00;
