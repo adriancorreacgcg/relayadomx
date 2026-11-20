@@ -24,7 +24,7 @@ public final class Remoto implements MqttCallbackExtended {
         void onPar(boolean enlazado);
         void onTarjetaRemota(boolean lista);
         void onTarjetaDatos(String marca, String pan, String venc);
-        void onAprobado();
+        void onResultado(int estado);
         void onAviso(String s);
     }
 
@@ -49,7 +49,6 @@ public final class Remoto implements MqttCallbackExtended {
 
     private static final long VIGENCIA_PAR = 4000;
     private static final long VIGENCIA_TARJETA = 6000;
-    private static final long VIGENCIA_APROBADO = 25000;
     private static final long ESPERA_ENLACE = 12000;
 
     private MqttAsyncClient cli;
@@ -64,7 +63,6 @@ public final class Remoto implements MqttCallbackExtended {
     private volatile int indice;
     private volatile long ultimoPar;
     private volatile long ultimaTarjeta;
-    private volatile long ultimoAprobado;
     private volatile long desde;
     private volatile boolean latiendo;
     private Lector lector;
@@ -88,10 +86,6 @@ public final class Remoto implements MqttCallbackExtended {
         return System.currentTimeMillis() - ultimaTarjeta < VIGENCIA_TARJETA;
     }
 
-    public boolean aprobadoFresco() {
-        return ultimoAprobado > 0 && System.currentTimeMillis() - ultimoAprobado < VIGENCIA_APROBADO;
-    }
-
     public void conectar(String codigo, boolean comoPagar, Lector l, Enlace e) {
         pagar = comoPagar;
         tunel = true;
@@ -100,7 +94,6 @@ public final class Remoto implements MqttCallbackExtended {
         par = false;
         ultimoPar = 0;
         ultimaTarjeta = 0;
-        ultimoAprobado = 0;
         activo = false;
         tarjetaLocal = false;
         indice = 0;
@@ -174,17 +167,10 @@ public final class Remoto implements MqttCallbackExtended {
         publicar("c", lista ? "1" : "0");
     }
 
-    public void aprobar() {
-        ultimoAprobado = System.currentTimeMillis();
-        publicar("k", String.valueOf(ultimoAprobado));
-        avisarAprobado();
-    }
-
-    public void limpiarAprobado() {
-        if (ultimoAprobado == 0) return;
-        ultimoAprobado = 0;
-        publicar("k", "0");
-        avisarAprobado();
+    /** 0 en espera, 1 en curso, 2 aprobada, 3 no concluida. */
+    public void resultado(int estado) {
+        if (!pagar) return;
+        publicar("k", String.valueOf(estado));
     }
 
     public void desconectar() {
@@ -193,7 +179,6 @@ public final class Remoto implements MqttCallbackExtended {
         latiendo = false;
         activo = false;
         par = false;
-        ultimoAprobado = 0;
         respuestas.clear();
         cerrar();
         avisarServidor(APAGADO, "apagado");
@@ -333,9 +318,14 @@ public final class Remoto implements MqttCallbackExtended {
             return;
         }
         if (t.equals("k")) {
-            if (propio) return;
-            ultimoAprobado = "0".equals(p) ? 0 : System.currentTimeMillis();
-            avisarAprobado();
+            if (propio || pagar) return;
+            int n;
+            try {
+                n = Integer.parseInt(p.trim());
+            } catch (Exception e) {
+                return;
+            }
+            avisarResultado(n);
             return;
         }
         if (t.equals("d")) {
@@ -393,6 +383,7 @@ public final class Remoto implements MqttCallbackExtended {
             if (nuevo.equals(datosEnviados)) return;
             datosEnviados = nuevo;
             publicar("d", nuevo);
+            avisarTarjetaDatos(marca, pan, venc);
             reg("tarjeta: " + marca + " " + pan + " " + (venc == null ? "" : venc));
         } catch (Exception e) {
             reg("analizar falló: " + e.getMessage());
@@ -480,9 +471,9 @@ public final class Remoto implements MqttCallbackExtended {
         if (e != null) e.onTarjetaDatos(marca, pan, venc);
     }
 
-    private void avisarAprobado() {
+    private void avisarResultado(int estado) {
         Enlace e = enlace;
-        if (e != null) e.onAprobado();
+        if (e != null) e.onResultado(estado);
     }
 
     private static void reg(String s) {
