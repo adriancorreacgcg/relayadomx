@@ -42,16 +42,22 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private static final int PAGAR = 1;
     private static final int TARJETA = 2;
 
-    private static final ColorStateList COLOR_OK =
-            ColorStateList.valueOf(0xFF2ECC71);
-    private static final ColorStateList COLOR_NEUTRO =
-            ColorStateList.valueOf(0xFF13293D);
+    private static final int ESPERA = 0;
+    private static final int CURSO = 1;
+    private static final int APROBADA = 2;
+    private static final int NO_CONCLUIDA = 3;
+
+    private static final ColorStateList COLOR_ESPERA = ColorStateList.valueOf(0xFF13293D);
+    private static final ColorStateList COLOR_CURSO = ColorStateList.valueOf(0xFF2B1E3F);
+    private static final ColorStateList COLOR_APROBADA = ColorStateList.valueOf(0xFF2ECC71);
+    private static final ColorStateList COLOR_FALLO = ColorStateList.valueOf(0xFF8C2F2F);
 
     private UsbManager usbManager;
     private TextView modoEstado;
     private TextView brokerEstado;
     private TextView enlaceEstado;
     private TextView tarjetaEstado;
+    private TextView tarjetaRemota;
     private TextView tarjetaDatos;
     private TextView txEstado;
     private TextView cardInfo;
@@ -83,14 +89,19 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
     private volatile String datosTarjeta = "";
     private volatile boolean tx;
     private volatile long txUltima;
+    private volatile boolean genAcOk;
+    private volatile int resultado = ESPERA;
     private Thread hiloRelay;
     private UsbDevice pendiente;
     private volatile int ultimoEstado = -1;
 
     private final Runnable latidoTx = new Runnable() {
         @Override public void run() {
-            if (tx && System.currentTimeMillis() - txUltima > 5000) tx = false;
-            if (modo != NINGUNO) render();
+            if (tx && System.currentTimeMillis() - txUltima > 5000) {
+                tx = false;
+                if (resultado == CURSO) transaccionFin();
+            }
+            render();
             ui.postDelayed(this, 1000);
         }
     };
@@ -120,6 +131,7 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         brokerEstado = findViewById(R.id.brokerEstado);
         enlaceEstado = findViewById(R.id.enlaceEstado);
         tarjetaEstado = findViewById(R.id.tarjetaEstado);
+        tarjetaRemota = findViewById(R.id.tarjetaRemota);
         tarjetaDatos = findViewById(R.id.tarjetaDatos);
         txEstado = findViewById(R.id.txEstado);
         cardInfo = findViewById(R.id.cardInfo);
@@ -141,7 +153,12 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         findViewById(R.id.apduButton).setOnClickListener(v ->
                 scrollLog.setVisibility(scrollLog.getVisibility() == View.VISIBLE
                         ? View.GONE : View.VISIBLE));
-        aprobadoButton.setOnClickListener(v -> Remoto.I.aprobar());
+        aprobadoButton.setOnClickListener(v -> {
+            resultado = ESPERA;
+            genAcOk = false;
+            Remoto.I.resultado(ESPERA);
+            render();
+        });
         findViewById(R.id.connectButton).setOnClickListener(v -> {
             if (pn532.abierto()) { detenerTodo(); pn532.cerrar(); log("Sin conexión USB"); }
             else conectar();
@@ -192,41 +209,65 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                     : par ? "Enlace: LISTO" : "Enlace: esperando");
             enlaceEstado.setTextColor(par ? 0xFF2ECC71 : 0xFFFFB020);
 
-            boolean remota = Remoto.I.tarjetaRemotaFresca();
             boolean local = lector.lista();
-            String t;
-            boolean verde;
-            if (modo == TARJETA) {
-                t = local ? "Tarjeta: LISTA" : "Tarjeta: sin tarjeta";
-                verde = local;
-            } else if (modo == PAGAR) {
-                t = remota ? "Tarjeta: LISTA EN EL OTRO" : "Tarjeta: sin confirmar";
-                verde = remota;
-            } else {
-                t = "Tarjeta:";
-                verde = false;
-            }
-            tarjetaEstado.setText(t);
-            tarjetaEstado.setTextColor(verde ? 0xFF2ECC71 : 0xFF8FB8DE);
-            tarjetaDatos.setText(datosTarjeta);
+            tarjetaEstado.setText(local ? "Tarjeta: ACTIVA" : "Tarjeta: sin tarjeta");
+            tarjetaEstado.setTextColor(local ? 0xFF2ECC71 : 0xFF8FB8DE);
 
+            boolean remota = Remoto.I.tarjetaRemotaFresca();
+            tarjetaRemota.setText(remota ? "En el otro teléfono: PRESENTADA"
+                    : "En el otro teléfono: sin tarjeta");
+            tarjetaRemota.setTextColor(remota ? 0xFF2ECC71 : 0xFF8FB8DE);
+
+            tarjetaDatos.setText(datosTarjeta);
             txEstado.setText(tx ? "Transacción en curso" : "");
             txEstado.setTextColor(0xFFFF5C5C);
 
-            boolean ok = Remoto.I.aprobadoFresco();
-            aprobadoButton.setText(ok ? "APROBADO" : "Aprobado");
-            aprobadoButton.setTextColor(ok ? 0xFFFFFFFF : 0xFF8FB8DE);
-            aprobadoButton.setBackgroundTintList(ok ? COLOR_OK : COLOR_NEUTRO);
+            switch (resultado) {
+                case CURSO:
+                    aprobadoButton.setText("EN CURSO");
+                    aprobadoButton.setTextColor(0xFFFFB020);
+                    aprobadoButton.setBackgroundTintList(COLOR_CURSO);
+                    break;
+                case APROBADA:
+                    aprobadoButton.setText("APROBADA");
+                    aprobadoButton.setTextColor(0xFFFFFFFF);
+                    aprobadoButton.setBackgroundTintList(COLOR_APROBADA);
+                    break;
+                case NO_CONCLUIDA:
+                    aprobadoButton.setText("NO CONCLUIDA");
+                    aprobadoButton.setTextColor(0xFFFFFFFF);
+                    aprobadoButton.setBackgroundTintList(COLOR_FALLO);
+                    break;
+                default:
+                    aprobadoButton.setText("En espera");
+                    aprobadoButton.setTextColor(0xFF8FB8DE);
+                    aprobadoButton.setBackgroundTintList(COLOR_ESPERA);
+                    break;
+            }
         });
     }
 
     void apduEntrante() {
         txUltima = System.currentTimeMillis();
-        if (!tx) {
-            tx = true;
-            Remoto.I.limpiarAprobado();
-            render();
-        }
+        if (tx) return;
+        tx = true;
+        genAcOk = false;
+        resultado = CURSO;
+        Remoto.I.resultado(CURSO);
+        render();
+    }
+
+    void genAcVisto(boolean ok) {
+        if (ok) genAcOk = true;
+    }
+
+    void transaccionFin() {
+        if (!tx) return;
+        tx = false;
+        resultado = genAcOk ? APROBADA : NO_CONCLUIDA;
+        genAcOk = false;
+        Remoto.I.resultado(resultado);
+        render();
     }
 
     private String clave() {
@@ -251,6 +292,8 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
                 tarjetaLista = false;
                 datosTarjeta = "";
                 tx = false;
+                genAcOk = false;
+                resultado = ESPERA;
                 render();
                 Puente.I.activar();
                 preferir(true);
@@ -311,6 +354,8 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         tarjetaLista = false;
         datosTarjeta = "";
         tx = false;
+        genAcOk = false;
+        resultado = ESPERA;
         servidor = Remoto.APAGADO;
         servidorTexto = "apagado";
         render();
@@ -344,7 +389,9 @@ public class MainActivity extends Activity implements Pn532.Log, Lector.Aviso, R
         render();
     }
 
-    @Override public void onAprobado() {
+    @Override public void onResultado(int estado) {
+        resultado = estado;
+        if (estado != CURSO) genAcOk = false;
         render();
     }
 
